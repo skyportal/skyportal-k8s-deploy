@@ -1,0 +1,114 @@
+# SkyPortal on NRP Nautilus — split-pod Helm values.
+# Override per environment with `-f values-prod.yaml` etc.
+
+nameOverride: ""
+fullnameOverride: "skyportal"
+
+image:
+  # Built from the SkyPortal `nrp-deploy` branch (baselayer pinned to #424).
+  repository: ghcr.io/skyportal/skyportal
+  tag: ""                 # defaults to Chart.appVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# ---------------------------------------------------------------------------
+# Message bus (baselayer #424). The message-bus pod runs message_proxy and
+# binds these ports; app + workers connect to `host`, the websocket server
+# reads published events from it. `host` is the message-bus Service name.
+# ---------------------------------------------------------------------------
+messageBus:
+  host: skyportal-message-bus
+  receivePort: 64002      # bus listens for incoming messages (app/workers push here)
+  publishPort: 64003      # bus publishes; websocket_server reads here
+
+# ---------------------------------------------------------------------------
+# Service split. Each role becomes one Deployment running `make run_production`
+# with `services.disabled: '*'` plus `services.enabled: <role's list>`, so each
+# pod runs only its own services. `rspack`/`fake_oauth2` (dev-only) run nowhere.
+# ---------------------------------------------------------------------------
+roles:
+  app:
+    # user-facing: web/API + nginx + websockets; migration_manager runs DB migrations once.
+    enabled: [app, nginx, websocket_server, status_server, migration_manager]
+    replicas: 1
+    resources:
+      requests: { cpu: "500m", memory: "1Gi" }
+      limits:   { cpu: "2",    memory: "4Gi" }
+  bus:
+    enabled: [message_proxy]
+    replicas: 1
+    resources:
+      requests: { cpu: "100m", memory: "128Mi" }
+      limits:   { cpu: "500m", memory: "512Mi" }
+  workers:
+    # everything background: cron/dask + the skyportal queues & analysis services.
+    enabled:
+      - cron
+      - dask
+      - external_logging
+      - recurring_apis
+      - facility_queue
+      - gcn_service
+      - health_monitor
+      - hermes_skyportal_sync
+      - ngsf_analysis_service
+      - notification_queue
+      - observation_plan_queue
+      - openai_analysis_service
+      - pdl_service
+      - reminders
+      - sharing_service_submission_queue
+      - slack
+      - sn_analysis_service
+      - spectral_cube_analysis_service
+      - thumbnail_queue
+      - tns_retrieval_queue
+      - watch_list
+    replicas: 1
+    resources:
+      requests: { cpu: "500m", memory: "2Gi" }
+      limits:   { cpu: "4",    memory: "8Gi" }
+
+service:
+  appPort: 5000           # app HTTP + websocket (nginx fronts both inside the pod)
+
+# ---------------------------------------------------------------------------
+# In-cluster Postgres (replaces Fritz's Cloud SQL).
+# ---------------------------------------------------------------------------
+postgres:
+  image: postgres:17
+  database: skyportal
+  user: skyportal
+  # password comes from the skyportal-secrets Secret (key postgres-password)
+  storage:
+    size: 20Gi
+    storageClassName: ""                      # "" = cluster default RWO class (NRP: rook-ceph-block-west)
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits:   { cpu: "2",    memory: "4Gi" }
+
+# ---------------------------------------------------------------------------
+# Shared file storage (RWX) for thumbnails + persisted data, mounted into
+# app + workers.
+# ---------------------------------------------------------------------------
+persistentData:
+  size: 50Gi
+  storageClassName: ""                        # "" = cluster default; MUST be RWX (NRP: rook-cephfs-west)
+
+# ---------------------------------------------------------------------------
+# Ingress (nginx-ingress + cert-manager on NRP).
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx                            # ingress controller class (NRP uses haproxy)
+  host: skyportal.example.com
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod           # cert-manager ClusterIssuer ("" to skip cert-manager)
+
+podSecurityContext:
+  fsGroup: 1000
+securityContext: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

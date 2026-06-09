@@ -1,0 +1,111 @@
+{{- /*
+One Deployment per role (app / message-bus / workers). Same image + entrypoint
+as Fritz; the per-role config overlay decides which services run. The bus binds
+the #424 TCP ports; app exposes the HTTP/websocket port.
+*/ -}}
+{{- range $role, $cfg := .Values.roles }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skyportal.fullname" $ }}-{{ $role }}
+  labels:
+    {{- include "skyportal.labels" $ | nindent 4 }}
+    skyportal.role: {{ $role }}
+spec:
+  replicas: {{ $cfg.replicas }}
+  strategy:
+    type: Recreate                # SkyPortal isn't built for rolling DB migrations
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "skyportal.name" $ }}
+      skyportal.role: {{ $role }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "skyportal.name" $ }}
+        skyportal.role: {{ $role }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") $ | sha256sum }}
+    spec:
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "skyportal.fullname" $ }}-secrets
+            items:
+              - { key: config.yaml, path: config.yaml }
+        - name: role-config
+          configMap:
+            name: {{ include "skyportal.fullname" $ }}-config-{{ $role }}
+            items:
+              - { key: role.yaml, path: role.yaml }
+        {{- if ne $role "bus" }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "skyportal.fullname" $ }}-data
+        {{- end }}
+      containers:
+        - name: skyportal
+          image: {{ include "skyportal.image" $ | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          {{- if eq $role "app" }}
+          ports:
+            - { containerPort: {{ $.Values.service.appPort }}, name: app-port }
+          {{- else if eq $role "bus" }}
+          ports:
+            - { containerPort: {{ $.Values.messageBus.receivePort }}, name: bus-recv }
+            - { containerPort: {{ $.Values.messageBus.publishPort }}, name: bus-pub }
+          {{- end }}
+          env:
+            - name: PYTHONPATH
+              value: "."
+            - name: FLAGS
+              value: "--config=config.yaml --config=/etc/skyportal/config.yaml --config=/etc/skyportal/role.yaml"
+          args:
+            - /bin/bash
+            - -c
+            - |
+              source .venv/bin/activate && \
+              (make log &) && \
+              baselayer/tools/env_summary.py ${FLAGS} && \
+              make fill_conf_values && \
+              make service_setup && \
+              make run_production
+          volumeMounts:
+            - { name: config,      mountPath: /etc/skyportal/config.yaml, subPath: config.yaml, readOnly: true }
+            - { name: role-config, mountPath: /etc/skyportal/role.yaml,   subPath: role.yaml,   readOnly: true }
+            {{- if ne $role "bus" }}
+            - { name: data, mountPath: /skyportal/persistentdata,      subPath: persistentdata }
+            - { name: data, mountPath: /skyportal/static/thumbnails,   subPath: thumbnails }
+            {{- end }}
+          {{- if eq $role "app" }}
+          livenessProbe:
+            tcpSocket: { port: app-port }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          readinessProbe:
+            httpGet: { path: /, port: app-port }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          {{- end }}
+          resources:
+            {{- toYaml $cfg.resources | nindent 12 }}
+      {{- with $.Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

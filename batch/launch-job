@@ -1,2 +1,0 @@
-TIMESTAMP=$(date '+%Y-%m-%d-%H-%M-%S') \
-  envsubst < $1 | kubectl create -f -

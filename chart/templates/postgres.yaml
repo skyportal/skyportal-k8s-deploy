@@ -1,0 +1,57 @@
+# In-cluster Postgres (replaces Fritz's Cloud SQL). The base config Secret must
+# set database.host to {{ include "skyportal.fullname" . }}-postgres and
+# database.password to match the postgres-password Secret key.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "skyportal.fullname" . }}-postgres
+  labels:
+    {{- include "skyportal.labels" . | nindent 4 }}
+    skyportal.role: postgres
+spec:
+  serviceName: {{ include "skyportal.fullname" . }}-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "skyportal.name" . }}
+      skyportal.role: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "skyportal.name" . }}
+        skyportal.role: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image | quote }}
+          ports:
+            - { containerPort: 5432, name: postgres }
+          env:
+            - { name: POSTGRES_DB,   value: {{ .Values.postgres.database | quote }} }
+            - { name: POSTGRES_USER, value: {{ .Values.postgres.user | quote }} }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skyportal.fullname" . }}-secrets
+                  key: postgres-password
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          volumeMounts:
+            - { name: pgdata, mountPath: /var/lib/postgresql/data }
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ .Values.postgres.user | quote }}]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.postgres.storage.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storage.size }}

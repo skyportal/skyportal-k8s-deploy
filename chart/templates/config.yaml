@@ -1,0 +1,28 @@
+{{- /*
+Per-role config overlay, merged on top of the base config Secret via the third
+--config flag. `disabled: '*'` turns every service off; `enabled` re-enables only
+this role's services. All roles point at the message-bus Service (#424 TCP bus).
+*/ -}}
+{{- range $role, $cfg := .Values.roles }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "skyportal.fullname" $ }}-config-{{ $role }}
+  labels:
+    {{- include "skyportal.labels" $ | nindent 4 }}
+    skyportal.role: {{ $role }}
+data:
+  role.yaml: |
+    hosts:
+      message_bus: {{ $.Values.messageBus.host }}
+    ports:
+      message_bus_receive: {{ $.Values.messageBus.receivePort }}
+      message_bus_publish: {{ $.Values.messageBus.publishPort }}
+    services:
+      disabled: "*"
+      enabled:
+      {{- range $cfg.enabled }}
+        - {{ . }}
+      {{- end }}
+{{- end }}

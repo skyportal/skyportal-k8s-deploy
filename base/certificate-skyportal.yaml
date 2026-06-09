@@ -1,7 +1,0 @@
-apiVersion: networking.gke.io/v1beta1
-kind: ManagedCertificate
-metadata:
-  name: certificate-skyportal-0
-spec:
-  domains:
-    - alpha.skyportal.io

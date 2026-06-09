@@ -1,0 +1,16 @@
+# Shared RWX file storage for thumbnails + persisted data (dustmaps, uploads),
+# mounted into the app + workers pods.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "skyportal.fullname" . }}-data
+  labels:
+    {{- include "skyportal.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteMany"]
+  {{- with .Values.persistentData.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistentData.size }}

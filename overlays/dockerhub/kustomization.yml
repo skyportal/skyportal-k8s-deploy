@@ -1,7 +1,0 @@
-resources:
-  - ../../base
-
-images:
-- name: gcr.io/PROJECT_ID/IMAGE:TAG
-  newName: skyportal/web
-  newTag: latest
