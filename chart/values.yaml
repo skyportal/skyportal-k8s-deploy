@@ -112,3 +112,20 @@ securityContext: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# ---------------------------------------------------------------------------
+# Observability (skyportal PR #6284): a Prometheus sidecar in the app pod scrapes
+# each worker's /api/internal/metrics (localhost-only, so it must share the pod's
+# netns). Requires app config observability.enabled and a System-admin scrape
+# token in `tokenSecret` (key: skyportal_token). Grafana is deployed separately.
+observability:
+  enabled: false
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    retention: 15d
+    workers: 4                    # app_internal ports scraped: 65000..65000+workers-1
+    port: 65000                   # app_internal base (baselayer ports.app_internal)
+    tokenSecret: skyportal-obs-secret
+    resources:
+      requests: { cpu: "100m", memory: "256Mi" }
+      limits:   { cpu: "200m", memory: "512Mi" }

@@ -50,6 +50,35 @@ spec:
           persistentVolumeClaim:
             claimName: {{ include "skyportal.fullname" $ }}-data
         {{- end }}
+        {{- if and (eq $role "app") $.Values.observability.enabled }}
+        - name: prometheus-config
+          configMap:
+            name: {{ include "skyportal.fullname" $ }}-prometheus-config
+        - name: prometheus-token
+          secret:
+            secretName: {{ $.Values.observability.prometheus.tokenSecret }}
+            items:
+              - { key: skyportal_token, path: skyportal_token }
+        - name: prometheus-data
+          emptyDir: {}
+        {{- end }}
+      {{- if ne $role "bus" }}
+      # cephfs subPaths are created root:root and fsGroup does not chown them, so uid-1000
+      # pods can't write cutout/PNG thumbnails -> chown the data subdirs once, as root.
+      initContainers:
+        - name: fix-data-perms
+          image: {{ include "skyportal.image" $ | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command:
+            - sh
+            - -c
+            - mkdir -p /data/thumbnails /data/persistentdata && chown {{ $.Values.podSecurityContext.fsGroup | default 1000 }}:{{ $.Values.podSecurityContext.fsGroup | default 1000 }} /data/thumbnails /data/persistentdata
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      {{- end }}
       containers:
         - name: skyportal
           image: {{ include "skyportal.image" $ | quote }}
@@ -85,6 +114,13 @@ spec:
             - { name: data, mountPath: /skyportal/static/thumbnails,   subPath: thumbnails }
             {{- end }}
           {{- if eq $role "app" }}
+          # the app's migration + load can take minutes; a startupProbe gives it
+          # room to come up before the liveness probe can kill it (it was flapping).
+          # 100 x 15s = 25 min grace — covers a cold migration on a loaded DB.
+          startupProbe:
+            tcpSocket: { port: app-port }
+            periodSeconds: 15
+            failureThreshold: 100
           livenessProbe:
             tcpSocket: { port: app-port }
             initialDelaySeconds: 30
@@ -96,6 +132,24 @@ spec:
           {{- end }}
           resources:
             {{- toYaml $cfg.resources | nindent 12 }}
+        {{- if and (eq $role "app") $.Values.observability.enabled }}
+        # Prometheus sidecar: shares the pod netns to scrape each worker's
+        # localhost /api/internal/metrics (skyportal PR #6284).
+        - name: prometheus
+          image: {{ $.Values.observability.prometheus.image | quote }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ $.Values.observability.prometheus.retention }}
+          ports:
+            - { containerPort: 9090, name: prom }
+          volumeMounts:
+            - { name: prometheus-config, mountPath: /etc/prometheus/prometheus.yml, subPath: prometheus.yml, readOnly: true }
+            - { name: prometheus-token,  mountPath: /etc/prometheus/token, readOnly: true }
+            - { name: prometheus-data,   mountPath: /prometheus }
+          resources:
+            {{- toYaml $.Values.observability.prometheus.resources | nindent 12 }}
+        {{- end }}
       {{- with $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
