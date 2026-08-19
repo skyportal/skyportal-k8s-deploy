@@ -1,0 +1,9 @@
+apiVersion: v2
+name: skyportal
+description: >-
+  SkyPortal on the NRP Nautilus cluster, split across app / message-bus / workers
+  pods (baselayer #424 TCP message bus) plus in-cluster Postgres.
+type: application
+version: 0.1.0
+# appVersion tracks the SkyPortal image tag (overridable via values.image.tag).
+appVersion: "latest"

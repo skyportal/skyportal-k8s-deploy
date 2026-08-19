@@ -1,0 +1,44 @@
+# app: nginx fronts HTTP + /websocket on one port. message-bus: the #424 TCP
+# ports. postgres: the DB. Names match values (messageBus.host, database.host).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skyportal.fullname" . }}-app
+  labels:
+    {{- include "skyportal.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "skyportal.name" . }}
+    skyportal.role: app
+  ports:
+    - { name: http, port: 80, targetPort: app-port }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.messageBus.host }}
+  labels:
+    {{- include "skyportal.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "skyportal.name" . }}
+    skyportal.role: bus
+  ports:
+    - { name: receive, port: {{ .Values.messageBus.receivePort }}, targetPort: bus-recv }
+    - { name: publish, port: {{ .Values.messageBus.publishPort }}, targetPort: bus-pub }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skyportal.fullname" . }}-postgres
+  labels:
+    {{- include "skyportal.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "skyportal.name" . }}
+    skyportal.role: postgres
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }

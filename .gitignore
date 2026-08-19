@@ -1,9 +1,4 @@
-# Don't commit our secrets
-config-secret.yaml
-
-*~
-.terraform
-*.retry
-*.pem
-*.backup
-*.tfstate
+# real secrets never get committed; copy secrets.example.yaml -> secrets.yaml
+secrets.yaml
+*.enc.yaml.dec
+.env

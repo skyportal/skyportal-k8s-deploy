@@ -1,0 +1,46 @@
+{{- if .Values.observability.enabled }}
+{{- $o := .Values.observability.prometheus }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "skyportal.fullname" . }}-prometheus-config
+  labels:
+    {{- include "skyportal.labels" . | nindent 4 }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+    scrape_configs:
+      # Scrape each app worker directly (localhost, same pod) — not the public
+      # port, which round-robins workers and returns inconsistent counters.
+      - job_name: skyportal-app
+        metrics_path: /api/internal/metrics
+        authorization:
+          type: token
+          credentials_file: /etc/prometheus/token/skyportal_token
+        static_configs:
+          - targets:
+            {{- range $i := until (int $o.workers) }}
+              - "127.0.0.1:{{ add (int $o.port) $i }}"
+            {{- end }}
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: worker
+---
+# Headless: NRP ClusterIP VIP routing is unreliable, so resolve straight to the
+# app pod IP (same pattern as the postgres/osg services). Grafana reaches the
+# sidecar at http://<fullname>-prometheus:9090.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skyportal.fullname" . }}-prometheus
+  labels:
+    {{- include "skyportal.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "skyportal.name" . }}
+    skyportal.role: app
+  ports:
+    - { name: prom, port: 9090, targetPort: prom }
+{{- end }}
